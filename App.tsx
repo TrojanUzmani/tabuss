@@ -1,9 +1,7 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { GamePhase, WordCard, Team, GameSettings } from './types';
 import { INITIAL_WORDS } from './constants';
 
-// Fisher-Yates shuffle algorithm to ensure true randomness
 const shuffleArray = <T,>(array: T[]): T[] => {
   const shuffled = [...array];
   for (let i = shuffled.length - 1; i > 0; i--) {
@@ -16,29 +14,22 @@ const shuffleArray = <T,>(array: T[]): T[] => {
 };
 
 const App: React.FC = () => {
-  // Theme State
-  const [isDark, setIsDark] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return window.matchMedia('(prefers-color-scheme: dark)').matches;
-    }
-    return false;
-  });
+  const [isDark, setIsDark] = useState(() => 
+    typeof window !== 'undefined' ? window.matchMedia('(prefers-color-scheme: dark)').matches : false
+  );
 
-  // Game State
   const [phase, setPhase] = useState<GamePhase>(GamePhase.HOME);
   const [showRules, setShowRules] = useState(false);
   const [settings, setSettings] = useState<GameSettings>({
     roundTime: 60,
-    maxScore: 10,
+    maxScore: 15,
     skipLimit: 3
   });
   const [teams, setTeams] = useState<Team[]>([
-    { name: 'Takım A', score: 0 },
-    { name: 'Takım B', score: 0 }
+    { name: 'Grup Ateş', score: 0 },
+    { name: 'Grup Buz', score: 0 }
   ]);
   const [activeTeamIdx, setActiveTeamIdx] = useState(0);
-  
-  // Initialize with shuffled words from constants
   const [wordList, setWordList] = useState<WordCard[]>(() => shuffleArray(INITIAL_WORDS));
   const [usedWords, setUsedWords] = useState<Set<number>>(new Set());
   const [currentWordIdx, setCurrentWordIdx] = useState<number | null>(null);
@@ -47,21 +38,17 @@ const App: React.FC = () => {
 
   const timerRef = useRef<number | null>(null);
 
-  // Persistence for theme
   useEffect(() => {
-    if (isDark) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
+    document.documentElement.classList.toggle('dark', isDark);
   }, [isDark]);
 
-  // UI feedbacks
-  const triggerHaptic = () => {
-    if (window.navigator.vibrate) window.navigator.vibrate(50);
+  const triggerHaptic = (intensity: 'light' | 'medium' | 'heavy' = 'light') => {
+    if (window.navigator.vibrate) {
+      const patterns = { light: 30, medium: 70, heavy: [50, 30, 50] };
+      window.navigator.vibrate(patterns[intensity]);
+    }
   };
 
-  // Helper to get random unused word
   const pickRandomWord = useCallback(() => {
     if (usedWords.size >= wordList.length) {
       const reshuffled = shuffleArray(INITIAL_WORDS);
@@ -70,39 +57,30 @@ const App: React.FC = () => {
       setCurrentWordIdx(0);
       return;
     }
-
-    let idx: number;
+    let idx;
     do {
       idx = Math.floor(Math.random() * wordList.length);
     } while (usedWords.has(idx));
-
     setCurrentWordIdx(idx);
     setUsedWords(prev => new Set(prev).add(idx));
   }, [wordList, usedWords]);
 
-  // Timer logic
   useEffect(() => {
     if (phase === GamePhase.PLAYING && timeLeft > 0) {
-      timerRef.current = window.setInterval(() => {
-        setTimeLeft(prev => prev - 1);
-      }, 1000);
+      timerRef.current = window.setInterval(() => setTimeLeft(prev => prev - 1), 1000);
     } else if (timeLeft === 0 && phase === GamePhase.PLAYING) {
       endRound();
     }
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [phase, timeLeft]);
 
   const startGame = () => {
-    setTeams([
-      { name: 'Takım A', score: 0 },
-      { name: 'Takım B', score: 0 }
-    ]);
+    setTeams(prev => prev.map(t => ({ ...t, score: 0 })));
     setUsedWords(new Set());
     setWordList(shuffleArray(INITIAL_WORDS));
     setActiveTeamIdx(0);
     setPhase(GamePhase.PRE_ROUND);
+    triggerHaptic('medium');
   };
 
   const startRound = () => {
@@ -110,16 +88,14 @@ const App: React.FC = () => {
     setSkipsUsed(0);
     pickRandomWord();
     setPhase(GamePhase.PLAYING);
+    triggerHaptic('medium');
   };
 
   const endRound = () => {
     if (timerRef.current) clearInterval(timerRef.current);
-    const currentTeam = teams[activeTeamIdx];
-    if (currentTeam.score >= settings.maxScore) {
-      setPhase(GamePhase.GAME_OVER);
-    } else {
-      setPhase(GamePhase.POST_ROUND);
-    }
+    const winner = teams.find(t => t.score >= settings.maxScore);
+    setPhase(winner ? GamePhase.GAME_OVER : GamePhase.POST_ROUND);
+    triggerHaptic('heavy');
   };
 
   const nextTurn = () => {
@@ -127,107 +103,46 @@ const App: React.FC = () => {
     setPhase(GamePhase.PRE_ROUND);
   };
 
-  const handleCorrect = () => {
-    triggerHaptic();
-    setTeams(prev => {
-      const next = [...prev];
-      next[activeTeamIdx].score += 1;
-      return next;
-    });
-    pickRandomWord();
-  };
-
-  const handleTaboo = () => {
-    triggerHaptic();
-    setTeams(prev => {
-      const next = [...prev];
-      next[activeTeamIdx].score = Math.max(0, next[activeTeamIdx].score - 1);
-      return next;
-    });
-    pickRandomWord();
-  };
-
-  const handleSkip = () => {
-    if (skipsUsed < settings.skipLimit) {
+  const handleAction = (type: 'correct' | 'taboo' | 'skip') => {
+    if (type === 'correct') {
+      triggerHaptic('light');
+      setTeams(prev => {
+        const next = [...prev];
+        next[activeTeamIdx].score += 1;
+        return next;
+      });
+      pickRandomWord();
+    } else if (type === 'taboo') {
+      triggerHaptic('heavy');
+      setTeams(prev => {
+        const next = [...prev];
+        next[activeTeamIdx].score = Math.max(0, next[activeTeamIdx].score - 1);
+        return next;
+      });
+      pickRandomWord();
+    } else if (type === 'skip' && skipsUsed < settings.skipLimit) {
       setSkipsUsed(prev => prev + 1);
       pickRandomWord();
+      triggerHaptic('medium');
     }
   };
 
-  const ThemeToggle = () => (
-    <button 
-      onClick={() => setIsDark(!isDark)}
-      className="p-2 rounded-full bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-yellow-400 transition-colors shadow-sm"
-    >
-      {isDark ? (
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m12.728 0l-.707-.707M6.343 6.343l-.707-.707M12 5a7 7 0 100 14 7 7 0 000-14z" />
-        </svg>
-      ) : (
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-        </svg>
-      )}
-    </button>
-  );
-
-  const RulesModal = () => (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-6 animate-in fade-in duration-300">
-      <div className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-3xl p-8 shadow-2xl relative animate-in zoom-in-95 duration-300">
-        <button 
-          onClick={() => setShowRules(false)}
-          className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 p-2"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-        <h2 className="text-2xl font-black text-indigo-900 dark:text-indigo-400 mb-6 flex items-center gap-2">
-          <span>📜</span> Nasıl Oynanır?
-        </h2>
-        <div className="space-y-4 text-gray-700 dark:text-gray-300 leading-relaxed font-medium">
-          <div className="flex gap-3">
-            <div className="bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 rounded-full w-6 h-6 flex-shrink-0 flex items-center justify-center font-bold text-xs">1</div>
-            <p>Sıran geldiğinde üstteki kelimeyi takım arkadaşına anlatmaya çalış.</p>
-          </div>
-          <div className="flex gap-3 text-red-600 dark:text-red-400">
-            <div className="bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-full w-6 h-6 flex-shrink-0 flex items-center justify-center font-bold text-xs">2</div>
-            <p>Altta yazan 5 yasaklı kelimeyi asla kullanma!</p>
-          </div>
-          <div className="flex gap-3">
-            <div className="bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 rounded-full w-6 h-6 flex-shrink-0 flex items-center justify-center font-bold text-xs">3</div>
-            <p>El-kol hareketi, şarkı veya kelimenin bir kısmını söylemek yasaktır.</p>
-          </div>
-          <div className="flex gap-3">
-            <div className="bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 rounded-full w-6 h-6 flex-shrink-0 flex items-center justify-center font-bold text-xs">4</div>
-            <p>"DOĞRU" +1 puan kazandırır, "TABU" ise -1 puan kaybettirir.</p>
-          </div>
-          <div className="flex gap-3">
-            <div className="bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 rounded-full w-6 h-6 flex-shrink-0 flex items-center justify-center font-bold text-xs">5</div>
-            <p>Her turda sınırlı sayıda PAS hakkın vardır.</p>
-          </div>
+  const Card = ({ word, taboos }: { word: string; taboos: string[] }) => (
+    <div className="w-full max-w-sm mx-auto animate-card perspective-1000">
+      <div className="relative bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl border-b-[10px] border-indigo-600 dark:border-indigo-500 overflow-hidden transform transition-all hover:scale-[1.01]">
+        <div className="bg-gradient-to-br from-indigo-600 to-violet-700 dark:from-indigo-700 dark:to-violet-800 p-10 text-center">
+          <span className="text-[10px] font-extrabold tracking-[0.25em] text-white/50 uppercase block mb-3">HEDEF KELİME</span>
+          <h3 className="text-4xl font-black text-white uppercase tracking-tight leading-none drop-shadow-md">{word}</h3>
         </div>
-        <button 
-          onClick={() => setShowRules(false)}
-          className="w-full mt-8 bg-indigo-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-indigo-100 dark:shadow-none hover:bg-indigo-700 active:scale-95 transition-all"
-        >
-          ANLADIM
-        </button>
-      </div>
-    </div>
-  );
-
-  const Header = () => (
-    <div className="bg-indigo-700 dark:bg-slate-900 text-white p-4 shadow-lg flex justify-between items-center sticky top-0 z-50 border-b dark:border-slate-800 transition-colors">
-      <h1 className="text-xl font-bold italic tracking-tighter">TABU PRO</h1>
-      <div className="flex items-center gap-4">
-        <ThemeToggle />
-        <div className="flex gap-2 text-xs font-semibold">
-          <div className={activeTeamIdx === 0 ? "bg-white dark:bg-indigo-600 text-indigo-700 dark:text-white px-3 py-1 rounded-full border border-indigo-400 dark:border-transparent transition-all" : "px-3 py-1 opacity-70"}>
-            {teams[0].score}
-          </div>
-          <div className={activeTeamIdx === 1 ? "bg-white dark:bg-indigo-600 text-indigo-700 dark:text-white px-3 py-1 rounded-full border border-indigo-400 dark:border-transparent transition-all" : "px-3 py-1 opacity-70"}>
-            {teams[1].score}
+        <div className="p-10 space-y-6">
+          <span className="text-[10px] font-extrabold tracking-[0.25em] text-rose-500 dark:text-rose-400 uppercase block">YASAKLI KELİMELER</span>
+          <div className="space-y-4">
+            {taboos.map((t, i) => (
+              <div key={i} className="flex items-center justify-between group">
+                <span className="text-xl font-bold text-slate-700 dark:text-slate-300 group-hover:text-indigo-600 transition-colors">{t}</span>
+                <span className="text-rose-500/20 group-hover:text-rose-500 transition-all transform group-hover:rotate-12">✕</span>
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -235,237 +150,240 @@ const App: React.FC = () => {
   );
 
   return (
-    <div className="min-h-screen flex flex-col max-w-md mx-auto bg-white dark:bg-slate-950 transition-colors overflow-hidden relative">
-      {showRules && <RulesModal />}
-      {phase !== GamePhase.HOME && phase !== GamePhase.SETUP && <Header />}
+    <div className="min-h-screen flex flex-col max-w-lg mx-auto bg-slate-50 dark:bg-slate-950 transition-colors duration-500 overflow-hidden relative">
+      
+      {/* Dynamic Background */}
+      <div className="fixed inset-0 pointer-events-none opacity-20 dark:opacity-10 overflow-hidden">
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-indigo-500 blur-[120px] animate-pulse"></div>
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-rose-500 blur-[120px] animate-pulse"></div>
+      </div>
 
-      <main className="flex-1 flex flex-col p-6 overflow-y-auto">
+      {/* Header */}
+      {phase !== GamePhase.HOME && (
+        <nav className="sticky top-0 z-40 px-6 py-4 glass border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
+          <h1 className="text-xl font-black italic tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-violet-600">TABU ELITE</h1>
+          <div className="flex items-center gap-3">
+            <button onClick={() => setIsDark(!isDark)} className="p-2.5 rounded-2xl bg-white dark:bg-slate-800 shadow-sm border border-slate-200 dark:border-slate-700 text-amber-500">
+              {isDark ? '☀️' : '🌙'}
+            </button>
+            <div className="flex gap-1.5 p-1 bg-slate-100 dark:bg-slate-900 rounded-2xl">
+              {teams.map((t, i) => (
+                <div key={i} className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all ${activeTeamIdx === i ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500'}`}>
+                  {t.score}
+                </div>
+              ))}
+            </div>
+          </div>
+        </nav>
+      )}
+
+      <main className="flex-1 flex flex-col p-6 z-10">
+        
         {phase === GamePhase.HOME && (
-          <div className="flex-1 flex flex-col justify-center items-center text-center space-y-8 animate-in fade-in zoom-in-95 duration-500">
-            <div className="absolute top-6 right-6">
-              <ThemeToggle />
+          <div className="flex-1 flex flex-col justify-center items-center text-center space-y-12 animate-in fade-in zoom-in-95 duration-700">
+            <div className="relative group">
+              <div className="absolute -inset-6 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 rounded-[3rem] blur-2xl opacity-25 group-hover:opacity-40 transition duration-1000"></div>
+              <div className="relative glass border-2 border-white/20 dark:border-slate-800 rounded-[3rem] p-12 shadow-2xl">
+                <h1 className="text-8xl font-black tracking-tighter text-slate-900 dark:text-white mb-2">TABU</h1>
+                <div className="bg-indigo-600 text-white px-4 py-1 rounded-full text-[10px] font-black tracking-widest uppercase inline-block mx-auto">PRO EDITION</div>
+              </div>
             </div>
-            <div className="relative">
-              <div className="absolute -inset-2 bg-gradient-to-r from-indigo-600 to-purple-600 rounded-lg blur opacity-40 dark:opacity-60"></div>
-              <h1 className="relative text-7xl font-extrabold text-indigo-900 dark:text-white mb-2 tracking-tighter">TABU</h1>
-            </div>
-            <p className="text-gray-600 dark:text-gray-400 font-medium">Gerçek bir Tabu deneyimine hazır mısın?</p>
-            <div className="w-full space-y-4 pt-8">
-              <button 
-                onClick={() => setPhase(GamePhase.SETUP)}
-                className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold text-lg shadow-xl shadow-indigo-100 dark:shadow-none hover:bg-indigo-700 active:scale-95 transition-all"
-              >
+            <p className="text-slate-500 dark:text-slate-400 font-medium max-w-[240px]">Arkadaşlarınla eğlencenin doruğuna ulaşmaya hazır mısın?</p>
+            <div className="w-full space-y-4 max-w-xs">
+              <button onClick={() => { triggerHaptic('medium'); setPhase(GamePhase.SETUP); }} 
+                className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-3xl font-black text-xl shadow-2xl shadow-indigo-200 dark:shadow-none transition-all active:scale-95">
                 OYUNA BAŞLA
               </button>
-              <button 
-                onClick={() => setShowRules(true)}
-                className="w-full bg-white dark:bg-slate-900 border-2 border-gray-100 dark:border-slate-800 text-gray-600 dark:text-gray-300 py-4 rounded-2xl font-bold text-lg hover:border-indigo-200 dark:hover:border-indigo-500 active:scale-95 transition-all flex items-center justify-center gap-2"
-              >
+              <button onClick={() => setShowRules(true)} 
+                className="w-full py-5 glass border-2 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 rounded-3xl font-bold text-lg hover:border-indigo-400 transition-all flex items-center justify-center gap-3">
                 <span>📜</span> KURALLAR
               </button>
             </div>
-            <div className="text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-widest font-black">Toplam {INITIAL_WORDS.length} Kelime Havuzu</div>
+            <div className="text-[10px] text-slate-400 font-black tracking-widest uppercase">300+ PREMIUM KELİME</div>
           </div>
         )}
 
         {phase === GamePhase.SETUP && (
-          <div className="space-y-8 animate-in slide-in-from-bottom-10 fade-in duration-300">
-            <div className="flex justify-between items-center">
-              <h2 className="text-2xl font-black text-gray-800 dark:text-white tracking-tight">Oyun Ayarları</h2>
-              <button onClick={() => setShowRules(true)} className="text-indigo-600 dark:text-indigo-400 font-bold text-sm underline">Kuralları Gör</button>
-            </div>
+          <div className="space-y-8 animate-in slide-in-from-bottom-10 fade-in duration-500">
+            <h2 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight">Özelleştir</h2>
+            
             <div className="space-y-6">
               <div className="space-y-3">
-                <label className="text-xs font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Tur Süresi (Saniye)</label>
+                <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">TUR SÜRESİ</label>
                 <div className="grid grid-cols-4 gap-2">
-                  {[45, 60, 90, 120].map(time => (
-                    <button 
-                      key={time}
-                      onClick={() => setSettings(s => ({...s, roundTime: time}))}
-                      className={`py-3 rounded-xl border-2 transition-all font-bold text-sm ${settings.roundTime === time ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg' : 'border-gray-100 dark:border-slate-800 text-gray-400 dark:text-slate-600 hover:border-indigo-200'}`}
-                    >
-                      {time}
+                  {[45, 60, 90, 120].map(val => (
+                    <button key={val} onClick={() => setSettings(s => ({...s, roundTime: val}))}
+                      className={`py-4 rounded-2xl border-2 font-bold text-sm transition-all ${settings.roundTime === val ? 'bg-indigo-600 border-indigo-600 text-white shadow-xl scale-105' : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800 text-slate-400 dark:text-slate-600'}`}>
+                      {val}s
                     </button>
                   ))}
                 </div>
               </div>
 
               <div className="space-y-3">
-                <label className="text-xs font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Bitiş Skoru</label>
+                <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">HEDEF PUAN</label>
                 <div className="grid grid-cols-4 gap-2">
-                  {[5, 10, 20, 30].map(score => (
-                    <button 
-                      key={score}
-                      onClick={() => setSettings(s => ({...s, maxScore: score}))}
-                      className={`py-3 rounded-xl border-2 transition-all font-bold text-sm ${settings.maxScore === score ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg' : 'border-gray-100 dark:border-slate-800 text-gray-400 dark:text-slate-600 hover:border-indigo-200'}`}
-                    >
-                      {score}
+                  {[10, 15, 20, 30].map(val => (
+                    <button key={val} onClick={() => setSettings(s => ({...s, maxScore: val}))}
+                      className={`py-4 rounded-2xl border-2 font-bold text-sm transition-all ${settings.maxScore === val ? 'bg-indigo-600 border-indigo-600 text-white shadow-xl scale-105' : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800 text-slate-400 dark:text-slate-600'}`}>
+                      {val}
                     </button>
                   ))}
                 </div>
               </div>
 
               <div className="space-y-3">
-                <label className="text-xs font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Takım İsimleri</label>
-                <div className="space-y-3">
-                  <div className="relative">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xs font-bold text-indigo-500">A</span>
-                    <input 
-                      type="text" 
-                      value={teams[0].name}
-                      onChange={(e) => setTeams(t => [{...t[0], name: e.target.value}, t[1]])}
-                      className="w-full pl-10 pr-4 py-4 rounded-xl bg-gray-50 dark:bg-slate-900 border-2 border-transparent focus:border-indigo-500 outline-none font-bold text-gray-800 dark:text-white transition-all"
-                    />
-                  </div>
-                  <div className="relative">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xs font-bold text-indigo-500">B</span>
-                    <input 
-                      type="text" 
-                      value={teams[1].name}
-                      onChange={(e) => setTeams(t => [t[0], {...t[1], name: e.target.value}])}
-                      className="w-full pl-10 pr-4 py-4 rounded-xl bg-gray-50 dark:bg-slate-900 border-2 border-transparent focus:border-indigo-500 outline-none font-bold text-gray-800 dark:text-white transition-all"
-                    />
-                  </div>
+                <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">TAKIMLAR</label>
+                <div className="grid gap-3">
+                  {teams.map((t, i) => (
+                    <div key={i} className="relative group">
+                      <div className={`absolute left-0 top-0 bottom-0 w-1.5 rounded-l-2xl ${i === 0 ? 'bg-indigo-500' : 'bg-rose-500'}`}></div>
+                      <input type="text" value={t.name} maxLength={15}
+                        onChange={(e) => setTeams(prev => { const n = [...prev]; n[i].name = e.target.value; return n; })}
+                        className="w-full py-5 pl-6 pr-4 rounded-2xl bg-white dark:bg-slate-900 border-2 border-slate-100 dark:border-slate-800 focus:border-indigo-500 dark:focus:border-indigo-500 outline-none font-black text-slate-800 dark:text-white transition-all shadow-sm"
+                      />
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
 
-            <button 
-              onClick={startGame}
-              className="w-full bg-indigo-600 text-white py-5 rounded-2xl font-bold text-lg shadow-xl hover:bg-indigo-700 active:scale-95 transition-all mt-8"
-            >
-              HAZIRIZ!
+            <button onClick={startGame} className="w-full py-6 bg-indigo-600 text-white rounded-[2rem] font-black text-xl shadow-2xl hover:bg-indigo-700 transition-all active:scale-95 mt-4">
+              HADİ BAŞLAYALIM!
             </button>
           </div>
         )}
 
         {phase === GamePhase.PRE_ROUND && (
-          <div className="flex-1 flex flex-col justify-center items-center text-center space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <div className="w-24 h-24 bg-indigo-100 dark:bg-indigo-900/50 rounded-full flex items-center justify-center text-5xl">
-              {activeTeamIdx === 0 ? '🔥' : '⚡'}
+          <div className="flex-1 flex flex-col justify-center items-center text-center space-y-10 animate-in fade-in slide-in-from-bottom-10 duration-500">
+            <div className="relative">
+              <div className={`w-32 h-32 rounded-[2.5rem] flex items-center justify-center text-6xl shadow-2xl animate-bounce-slow ${activeTeamIdx === 0 ? 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40' : 'bg-rose-100 text-rose-600 dark:bg-rose-900/40'}`}>
+                {activeTeamIdx === 0 ? '🔥' : '❄️'}
+              </div>
             </div>
-            <div>
-              <h2 className="text-lg font-black text-indigo-900 dark:text-indigo-400 uppercase tracking-widest mb-1">Sıradaki Takım</h2>
-              <div className="text-4xl font-black text-gray-900 dark:text-white drop-shadow-sm">{teams[activeTeamIdx].name}</div>
+            <div className="space-y-2">
+              <span className="text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-[0.3em]">SIRADAKİ TAKIM</span>
+              <h2 className="text-5xl font-black text-slate-900 dark:text-white tracking-tight">{teams[activeTeamIdx].name}</h2>
             </div>
-            <div className="bg-indigo-50 dark:bg-slate-900 p-6 rounded-2xl border-l-4 border-indigo-500 text-gray-600 dark:text-gray-400 font-medium">
-              Telefonu anlatıcıya verin ve herkes hazırsa butona basın!
+            <div className="glass p-6 rounded-[2rem] border-2 border-white/50 dark:border-slate-800 text-slate-600 dark:text-slate-400 font-bold max-w-xs leading-relaxed">
+              Hazırsan cihazı anlatıcıya ver ve butonla turu başlat!
             </div>
-            <button 
-              onClick={startRound}
-              className="w-full bg-green-600 text-white py-5 rounded-2xl font-bold text-xl shadow-xl hover:bg-green-700 active:scale-95 transition-all"
-            >
-              TURU BAŞLAT
+            <button onClick={startRound} className="w-full py-6 bg-green-600 hover:bg-green-700 text-white rounded-[2rem] font-black text-2xl shadow-2xl transition-all active:scale-95">
+              BAŞLAT 🚀
             </button>
           </div>
         )}
 
         {phase === GamePhase.PLAYING && currentWordIdx !== null && (
           <div className="flex-1 flex flex-col animate-in fade-in duration-300">
-            <div className="w-full h-2 bg-gray-100 dark:bg-slate-900 rounded-full mb-6 overflow-hidden">
-              <div 
-                className={`h-full transition-all duration-1000 ${timeLeft < 10 ? 'bg-red-500 animate-pulse' : 'bg-indigo-500'}`}
-                style={{ width: `${(timeLeft / settings.roundTime) * 100}%` }}
-              />
+            
+            {/* Custom Timer Bar */}
+            <div className="w-full mb-8 space-y-2">
+              <div className="flex justify-between items-end px-1">
+                <span className="text-4xl font-black font-mono tracking-tighter text-indigo-600 dark:text-indigo-400">
+                  {timeLeft}s
+                </span>
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                  PUAN: {teams[activeTeamIdx].score}
+                </span>
+              </div>
+              <div className="w-full h-3 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden shadow-inner">
+                <div className={`h-full transition-all duration-1000 ${timeLeft < 10 ? 'bg-rose-500 animate-pulse-fast' : 'bg-indigo-600'}`}
+                  style={{ width: `${(timeLeft / settings.roundTime) * 100}%` }} />
+              </div>
             </div>
 
-            <div className="flex-1 flex flex-col items-center justify-between">
-              <div className="w-full bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border-b-8 border-indigo-600 dark:border-indigo-800 overflow-hidden flex flex-col min-h-[420px] transition-colors">
-                <div className="bg-indigo-600 dark:bg-indigo-700 text-white py-10 text-center px-4 relative">
-                  <span className="text-[10px] font-black tracking-[0.2em] uppercase opacity-70 block mb-2">ANLATILACAK KELİME</span>
-                  <h3 className="text-4xl font-extrabold uppercase tracking-tight break-words">
-                    {wordList[currentWordIdx].word}
-                  </h3>
-                  <div className="absolute top-4 right-4 text-xs font-bold opacity-30">
-                    #{usedWords.size}
-                  </div>
-                </div>
-                <div className="flex-1 p-8 space-y-5">
-                  <span className="text-[10px] font-black tracking-[0.2em] text-red-500 dark:text-red-400 uppercase block mb-4">YASAKLI KELİMELER</span>
-                  {wordList[currentWordIdx].taboo.map((w, i) => (
-                    <div key={i} className="text-xl font-bold text-gray-700 dark:text-gray-300 border-b dark:border-slate-800 border-gray-50 pb-3 flex justify-between items-center group transition-colors">
-                      <span>{w}</span>
-                      <span className="text-red-500/20 group-hover:text-red-500 transition-colors">❌</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
+            <Card word={wordList[currentWordIdx].word} taboos={wordList[currentWordIdx].taboo} />
 
-              <div className="grid grid-cols-2 gap-4 w-full mt-8">
-                <button 
-                  onClick={handleTaboo}
-                  className="bg-red-500 dark:bg-red-600 text-white py-5 rounded-2xl font-black text-xl shadow-lg active:scale-90 transition-all border-b-4 border-red-700 dark:border-red-900"
-                >
-                  TABU!
-                </button>
-                <button 
-                  onClick={handleCorrect}
-                  className="bg-green-500 dark:bg-green-600 text-white py-5 rounded-2xl font-black text-xl shadow-lg active:scale-90 transition-all border-b-4 border-green-700 dark:border-green-900"
-                >
-                  DOĞRU
-                </button>
-                <button 
-                  disabled={skipsUsed >= settings.skipLimit}
-                  onClick={handleSkip}
-                  className={`col-span-2 py-4 rounded-2xl font-bold text-lg border-2 transition-all ${skipsUsed >= settings.skipLimit ? 'border-gray-200 dark:border-slate-800 text-gray-300 dark:text-slate-700' : 'border-indigo-600 dark:border-indigo-500 text-indigo-600 dark:text-indigo-400 active:bg-indigo-50 dark:active:bg-indigo-900/20'}`}
-                >
-                  PAS ({settings.skipLimit - skipsUsed} Kalan)
-                </button>
-              </div>
+            {/* Actions */}
+            <div className="grid grid-cols-2 gap-4 mt-auto pt-8">
+              <button onClick={() => handleAction('taboo')} className="py-6 bg-rose-500 dark:bg-rose-600 text-white rounded-3xl font-black text-xl shadow-xl active:scale-90 transition-all border-b-8 border-rose-700 dark:border-rose-900">
+                TABU!
+              </button>
+              <button onClick={() => handleAction('correct')} className="py-6 bg-emerald-500 dark:bg-emerald-600 text-white rounded-3xl font-black text-xl shadow-xl active:scale-90 transition-all border-b-8 border-emerald-700 dark:border-emerald-900">
+                DOĞRU
+              </button>
+              <button disabled={skipsUsed >= settings.skipLimit} onClick={() => handleAction('skip')}
+                className={`col-span-2 py-4 rounded-3xl font-black text-lg border-4 transition-all ${skipsUsed >= settings.skipLimit ? 'border-slate-200 dark:border-slate-800 text-slate-300 dark:text-slate-700' : 'border-indigo-600 dark:border-indigo-500 text-indigo-600 dark:text-indigo-400'}`}>
+                PAS ({settings.skipLimit - skipsUsed})
+              </button>
             </div>
           </div>
         )}
 
         {phase === GamePhase.POST_ROUND && (
-          <div className="flex-1 flex flex-col justify-center items-center text-center space-y-8 animate-in slide-in-from-bottom-10 duration-500">
-            <div className="text-5xl">⏰</div>
-            <h2 className="text-3xl font-black text-gray-800 dark:text-white uppercase tracking-tight">Tur Bitti!</h2>
-            <div className="bg-white dark:bg-slate-900 w-full p-8 rounded-3xl shadow-xl border-t-8 border-indigo-600 transition-colors">
-              <div className="space-y-4">
-                {teams.map((t, i) => (
-                  <div key={i} className={`flex justify-between items-center p-4 rounded-2xl transition-all ${activeTeamIdx === i ? 'bg-indigo-50 dark:bg-indigo-900/30 border-2 border-indigo-200 dark:border-indigo-700 ring-4 ring-indigo-50 dark:ring-indigo-900/10' : 'bg-gray-50 dark:bg-slate-800/50 border-2 border-transparent'}`}>
-                    <span className="font-black text-gray-700 dark:text-gray-300 uppercase tracking-tight">{t.name}</span>
-                    <span className="font-black text-indigo-600 dark:text-indigo-400 text-3xl">{t.score}</span>
-                  </div>
-                ))}
-              </div>
+          <div className="flex-1 flex flex-col justify-center items-center text-center space-y-10 animate-in slide-in-from-bottom-10 duration-500">
+            <div className="text-7xl mb-4">📢</div>
+            <h2 className="text-4xl font-black text-slate-900 dark:text-white tracking-tight uppercase">Tur Sona Erdi</h2>
+            <div className="w-full glass p-8 rounded-[2.5rem] border-2 border-white/50 dark:border-slate-800 space-y-4 shadow-2xl">
+              {teams.map((t, i) => (
+                <div key={i} className={`flex justify-between items-center p-5 rounded-[1.5rem] transition-all border-2 ${activeTeamIdx === i ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg scale-105' : 'bg-slate-50 dark:bg-slate-900/50 border-transparent text-slate-600 dark:text-slate-400'}`}>
+                  <span className="font-black uppercase tracking-tight">{t.name}</span>
+                  <span className="font-black text-3xl">{t.score}</span>
+                </div>
+              ))}
             </div>
-            <button 
-              onClick={nextTurn}
-              className="w-full bg-indigo-600 text-white py-5 rounded-2xl font-bold text-xl shadow-xl active:scale-95 transition-all"
-            >
-              SIRADAKİ TAKIMA GEÇ
+            <button onClick={nextTurn} className="w-full py-6 bg-indigo-600 text-white rounded-[2rem] font-black text-2xl shadow-2xl active:scale-95 transition-all">
+              SIRADAKİ TUR
             </button>
           </div>
         )}
 
         {phase === GamePhase.GAME_OVER && (
-          <div className="flex-1 flex flex-col justify-center items-center text-center space-y-10 animate-in zoom-in-90 duration-700">
+          <div className="flex-1 flex flex-col justify-center items-center text-center space-y-12 animate-in zoom-in-90 duration-700">
             <div className="relative">
-              <div className="text-9xl animate-bounce">🏆</div>
-              <div className="absolute top-0 -left-4 -rotate-12 animate-pulse text-4xl">✨</div>
-              <div className="absolute top-0 -right-4 rotate-12 animate-pulse text-4xl">✨</div>
+              <div className="text-[120px] leading-none animate-bounce">👑</div>
+              <div className="absolute top-0 -left-6 -rotate-12 text-5xl">✨</div>
+              <div className="absolute bottom-0 -right-6 rotate-12 text-5xl">✨</div>
             </div>
             <div>
-              <h2 className="text-5xl font-black text-indigo-900 dark:text-white uppercase tracking-tighter mb-4">TEBRİKLER!</h2>
-              <div className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600 drop-shadow-sm px-4">
-                {teams[0].score >= settings.maxScore ? teams[0].name : teams[1].name} Kazandı!
-              </div>
+              <span className="text-sm font-black text-indigo-600 dark:text-indigo-400 tracking-[0.4em] uppercase mb-2 block">ŞAMPİYON</span>
+              <h2 className="text-6xl font-black text-slate-900 dark:text-white tracking-tighter drop-shadow-lg">
+                {teams.reduce((a, b) => a.score > b.score ? a : b).name}
+              </h2>
             </div>
-            <div className="w-full flex flex-col gap-4">
-              <button 
-                onClick={() => setPhase(GamePhase.HOME)}
-                className="w-full bg-gray-900 dark:bg-slate-100 dark:text-slate-900 text-white py-5 rounded-2xl font-bold text-xl shadow-xl active:scale-95 transition-all"
-              >
-                ANA MENÜ
+            <div className="w-full space-y-4 pt-10">
+              <button onClick={() => setPhase(GamePhase.HOME)} className="w-full py-6 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 rounded-[2rem] font-black text-xl shadow-2xl active:scale-95 transition-all">
+                TEKRAR OYNA
               </button>
             </div>
           </div>
         )}
+
       </main>
-      
-      <footer className="p-4 text-center text-[10px] text-gray-400 dark:text-gray-600 font-black uppercase tracking-widest transition-colors">
-        Tabu Pro TROJAN UZMANI &copy; 2026
+
+      {/* Rules Modal */}
+      {showRules && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 animate-in fade-in duration-300">
+          <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-md" onClick={() => setShowRules(false)}></div>
+          <div className="relative bg-white dark:bg-slate-900 w-full max-w-sm rounded-[3rem] p-10 shadow-3xl border border-white/20 animate-in zoom-in-95 duration-500">
+            <button onClick={() => setShowRules(false)} className="absolute top-6 right-6 text-slate-400 hover:text-slate-600 p-2">✕</button>
+            <h3 className="text-3xl font-black text-indigo-600 mb-8 flex items-center gap-3">
+              <span>📜</span> Kurallar
+            </h3>
+            <div className="space-y-5 text-slate-600 dark:text-slate-300 font-semibold leading-relaxed">
+              <div className="flex gap-4 items-start">
+                <span className="w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 flex items-center justify-center text-[10px] font-black mt-1 shrink-0">1</span>
+                <p>Hedef kelimeyi takımına anlat, yasaklı olan 5 kelimeyi sakın söyleme!</p>
+              </div>
+              <div className="flex gap-4 items-start text-rose-500">
+                <span className="w-6 h-6 rounded-full bg-rose-100 dark:bg-rose-900/40 text-rose-500 flex items-center justify-center text-[10px] font-black mt-1 shrink-0">2</span>
+                <p>El-kol hareketi, parça söylemek veya yabancı dildeki karşılıklar yasaktır.</p>
+              </div>
+              <div className="flex gap-4 items-start">
+                <span className="w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 flex items-center justify-center text-[10px] font-black mt-1 shrink-0">3</span>
+                <p>Her doğru cevap +1, her Tabu -1 puan değerindedir.</p>
+              </div>
+            </div>
+            <button onClick={() => setShowRules(false)} className="w-full mt-10 py-5 bg-indigo-600 text-white rounded-[1.5rem] font-black text-lg shadow-xl active:scale-95 transition-all">
+              ANLADIM
+            </button>
+          </div>
+        </div>
+      )}
+
+      <footer className="py-6 text-center z-10">
+        <span className="text-[9px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-[0.5em]">ELITE TABU EXPERIENCE</span>
       </footer>
     </div>
   );
